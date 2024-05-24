@@ -314,7 +314,9 @@ type AgnosticBaseRouteObject = {
   hasErrorBoundary?: boolean;
   shouldRevalidate?: ShouldRevalidateFunction;
   handle?: any;
-  lazy?: LazyRouteFunction<AgnosticBaseRouteObject>;
+  lazy?:
+    | LazyRouteFunction<AgnosticBaseRouteObject>
+    | Array<LazyRouteFunction<AgnosticBaseRouteObject>>;
 };
 
 /**

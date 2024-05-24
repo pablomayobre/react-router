@@ -673,8 +673,8 @@ describe("lazily loaded route modules", () => {
 
       expect(t.router.state.fetchers.get(key)?.state).toBe("idle");
       expect(t.router.state.fetchers.get(key)?.data).toBe("LAZY LOADER B");
-      expect(lazyLoaderStubA).not.toHaveBeenCalled();
-      expect(lazyloaderStubB).toHaveBeenCalledTimes(2);
+      expect(lazyLoaderStubA).toHaveBeenCalledTimes(1);
+      expect(lazyloaderStubB).toHaveBeenCalledTimes(1);
     });
 
     it("runs lazily loaded route action on fetcher.submit() even if lazy() is interrupted", async () => {
@@ -714,8 +714,8 @@ describe("lazily loaded route modules", () => {
 
       expect(t.router.state.fetchers.get(key)?.state).toBe("idle");
       expect(t.router.state.fetchers.get(key)?.data).toBe("LAZY ACTION B");
-      expect(lazyActionStubA).not.toHaveBeenCalled();
-      expect(lazyActionStubB).toHaveBeenCalledTimes(2);
+      expect(lazyActionStubA).toHaveBeenCalledTimes(1);
+      expect(lazyActionStubB).toHaveBeenCalledTimes(1);
     });
 
     it("uses the first-resolved lazy() execution on repeated loading navigations", async () => {
@@ -751,8 +751,8 @@ describe("lazily loaded route modules", () => {
 
       expect(t.router.state.loaderData).toEqual({ lazy: "LAZY LOADER B" });
 
-      expect(lazyLoaderStubA).not.toHaveBeenCalled();
-      expect(lazyLoaderStubB).toHaveBeenCalledTimes(2);
+      expect(lazyLoaderStubA).toHaveBeenCalledTimes(1);
+      expect(lazyLoaderStubB).toHaveBeenCalledTimes(1);
     });
 
     it("uses the first-resolved lazy() execution on repeated submission navigations", async () => {
@@ -803,9 +803,9 @@ describe("lazily loaded route modules", () => {
       expect(t.router.state.actionData).toEqual({ lazy: "LAZY ACTION B" });
       expect(t.router.state.loaderData).toEqual({ lazy: "LAZY LOADER B" });
 
-      expect(lazyActionStubA).not.toHaveBeenCalled();
+      expect(lazyActionStubA).toHaveBeenCalledTimes(1);
       expect(lazyLoaderStubA).not.toHaveBeenCalled();
-      expect(lazyActionStubB).toHaveBeenCalledTimes(2);
+      expect(lazyActionStubB).toHaveBeenCalledTimes(1);
       expect(lazyLoaderStubB).toHaveBeenCalledTimes(1);
     });
 
@@ -839,8 +839,8 @@ describe("lazily loaded route modules", () => {
 
       expect(t.router.state.fetchers.get(key)?.state).toBe("idle");
       expect(t.router.state.fetchers.get(key)?.data).toBe("LAZY LOADER B");
-      expect(lazyLoaderStubA).not.toHaveBeenCalled();
-      expect(lazyLoaderStubB).toHaveBeenCalledTimes(2);
+      expect(lazyLoaderStubA).toHaveBeenCalledTimes(1);
+      expect(lazyLoaderStubB).toHaveBeenCalledTimes(1);
     });
   });
 

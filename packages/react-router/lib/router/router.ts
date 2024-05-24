@@ -4089,84 +4089,6 @@ function shouldRevalidateLoader(
   return arg.defaultShouldRevalidate;
 }
 
-/**
- * Execute route.lazy() methods to lazily load route modules (loader, action,
- * shouldRevalidate) and update the routeManifest in place which shares objects
- * with dataRoutes so those get updated as well.
- */
-async function loadLazyRouteModule(
-  route: AgnosticDataRouteObject,
-  mapRouteProperties: MapRoutePropertiesFunction,
-  manifest: RouteManifest
-) {
-  if (!route.lazy) {
-    return;
-  }
-
-  let lazyRoute = await route.lazy();
-
-  // If the lazy route function was executed and removed by another parallel
-  // call then we can return - first lazy() to finish wins because the return
-  // value of lazy is expected to be static
-  if (!route.lazy) {
-    return;
-  }
-
-  let routeToUpdate = manifest[route.id];
-  invariant(routeToUpdate, "No route found in manifest");
-
-  // Update the route in place.  This should be safe because there's no way
-  // we could yet be sitting on this route as we can't get there without
-  // resolving lazy() first.
-  //
-  // This is different than the HMR "update" use-case where we may actively be
-  // on the route being updated.  The main concern boils down to "does this
-  // mutation affect any ongoing navigations or any current state.matches
-  // values?".  If not, it should be safe to update in place.
-  let routeUpdates: Record<string, any> = {};
-  for (let lazyRouteProperty in lazyRoute) {
-    let staticRouteValue =
-      routeToUpdate[lazyRouteProperty as keyof typeof routeToUpdate];
-
-    let isPropertyStaticallyDefined =
-      staticRouteValue !== undefined &&
-      // This property isn't static since it should always be updated based
-      // on the route updates
-      lazyRouteProperty !== "hasErrorBoundary";
-
-    warning(
-      !isPropertyStaticallyDefined,
-      `Route "${routeToUpdate.id}" has a static property "${lazyRouteProperty}" ` +
-        `defined but its lazy function is also returning a value for this property. ` +
-        `The lazy route property "${lazyRouteProperty}" will be ignored.`
-    );
-
-    if (
-      !isPropertyStaticallyDefined &&
-      !immutableRouteKeys.has(lazyRouteProperty as ImmutableRouteKey)
-    ) {
-      routeUpdates[lazyRouteProperty] =
-        lazyRoute[lazyRouteProperty as keyof typeof lazyRoute];
-    }
-  }
-
-  // Mutate the route with the provided updates.  Do this first so we pass
-  // the updated version to mapRouteProperties
-  Object.assign(routeToUpdate, routeUpdates);
-
-  // Mutate the `hasErrorBoundary` property on the route based on the route
-  // updates and remove the `lazy` function so we don't resolve the lazy
-  // route again.
-  Object.assign(routeToUpdate, {
-    // To keep things framework agnostic, we use the provided
-    // `mapRouteProperties` (or wrapped `detectErrorBoundary`) function to
-    // set the framework-aware properties (`element`/`hasErrorBoundary`) since
-    // the logic will differ between frameworks.
-    ...mapRouteProperties(routeToUpdate),
-    lazy: undefined,
-  });
-}
-
 // Default implementation of `dataStrategy` which fetches all loaders in parallel
 function defaultDataStrategy(
   opts: DataStrategyFunctionArgs
@@ -4301,6 +4223,114 @@ async function callLoaderOrAction(
     return Promise.race([handlerPromise, abortPromise]);
   };
 
+  /**
+   * Execute route.lazy() methods to lazily load route modules (loader, action,
+   * shouldRevalidate) and update the routeManifest in place which shares objects
+   * with dataRoutes so those get updated as well.
+   */
+  async function loadLazyRouteModule(
+    route: AgnosticDataRouteObject,
+    mapRouteProperties: MapRoutePropertiesFunction,
+    manifest: RouteManifest,
+    handlerToRun?: "loader" | "action"
+  ): Promise<ReturnType<typeof runHandler> | void> {
+    if (!route.lazy) {
+      return;
+    }
+
+    let lazyHandlerResult: ReturnType<typeof runHandler> | undefined;
+    let lazyFunctions = Array.isArray(route.lazy) ? route.lazy : [route.lazy];
+    let lazyFunctionResults = await Promise.all(
+      lazyFunctions.map(async (lazyFn) => {
+        let lazyResult = await lazyFn();
+        let handler = handlerToRun ? lazyResult[handlerToRun] : null;
+        if (handler) {
+          if (lazyHandlerResult) {
+            throw new Error(
+              `Route "${route.id}" has multiple lazy functions returning a function for "${handlerToRun}". ` +
+                `Only one lazy function can return a function for "${handlerToRun}".`
+            );
+          }
+
+          // Handler still runs even if we got interrupted to maintain consistency
+          // with un-abortable behavior of handler execution on non-lazy or
+          // previously-lazy-loaded routes
+          lazyHandlerResult = runHandler(handler);
+        }
+        return lazyResult;
+      })
+    );
+
+    // TODO: Check for duplicate properties in lazy functions
+    let lazyRoute = Object.assign(
+      {},
+      ...lazyFunctionResults
+    ) as (typeof lazyFunctionResults)[number];
+
+    // If the lazy route function was executed and removed by another parallel
+    // call then we can return - first lazy() to finish wins because the return
+    // value of lazy is expected to be static
+    if (!route.lazy) {
+      return await lazyHandlerResult;
+    }
+
+    let routeToUpdate = manifest[route.id];
+    invariant(routeToUpdate, "No route found in manifest");
+
+    // Update the route in place.  This should be safe because there's no way
+    // we could yet be sitting on this route as we can't get there without
+    // resolving lazy() first.
+    //
+    // This is different than the HMR "update" use-case where we may actively be
+    // on the route being updated.  The main concern boils down to "does this
+    // mutation affect any ongoing navigations or any current state.matches
+    // values?".  If not, it should be safe to update in place.
+    let routeUpdates: Record<string, any> = {};
+    for (let lazyRouteProperty in lazyRoute) {
+      let staticRouteValue =
+        routeToUpdate[lazyRouteProperty as keyof typeof routeToUpdate];
+
+      let isPropertyStaticallyDefined =
+        staticRouteValue !== undefined &&
+        // This property isn't static since it should always be updated based
+        // on the route updates
+        lazyRouteProperty !== "hasErrorBoundary";
+
+      warning(
+        !isPropertyStaticallyDefined,
+        `Route "${routeToUpdate.id}" has a static property "${lazyRouteProperty}" ` +
+          `defined but its lazy function is also returning a value for this property. ` +
+          `The lazy route property "${lazyRouteProperty}" will be ignored.`
+      );
+
+      if (
+        !isPropertyStaticallyDefined &&
+        !immutableRouteKeys.has(lazyRouteProperty as ImmutableRouteKey)
+      ) {
+        routeUpdates[lazyRouteProperty] =
+          lazyRoute[lazyRouteProperty as keyof typeof lazyRoute];
+      }
+    }
+
+    // Mutate the route with the provided updates.  Do this first so we pass
+    // the updated version to mapRouteProperties
+    Object.assign(routeToUpdate, routeUpdates);
+
+    // Mutate the `hasErrorBoundary` property on the route based on the route
+    // updates and remove the `lazy` function so we don't resolve the lazy
+    // route again.
+    Object.assign(routeToUpdate, {
+      // To keep things framework agnostic, we use the provided
+      // `mapRouteProperties` (or wrapped `detectErrorBoundary`) function to
+      // set the framework-aware properties (`element`/`hasErrorBoundary`) since
+      // the logic will differ between frameworks.
+      ...mapRouteProperties(routeToUpdate),
+      lazy: undefined,
+    });
+
+    return await lazyHandlerResult;
+  }
+
   try {
     let handler = match.route[type];
 
@@ -4323,14 +4353,17 @@ async function callLoaderOrAction(
         result = value!;
       } else {
         // Load lazy route module, then run any returned handler
-        await loadLazyRouteModule(match.route, mapRouteProperties, manifest);
+        let lazyResult = await loadLazyRouteModule(
+          match.route,
+          mapRouteProperties,
+          manifest,
+          type
+        );
 
         handler = match.route[type];
+
         if (handler) {
-          // Handler still runs even if we got interrupted to maintain consistency
-          // with un-abortable behavior of handler execution on non-lazy or
-          // previously-lazy-loaded routes
-          result = await runHandler(handler);
+          result = lazyResult || (await runHandler(handler));
         } else if (type === "action") {
           let url = new URL(request.url);
           let pathname = url.pathname + url.search;
